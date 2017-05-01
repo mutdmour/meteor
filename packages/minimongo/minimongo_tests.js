@@ -2161,6 +2161,60 @@ Tinytest.add("minimongo - binary search", function (test) {
   checkSearchBackward([2, 2, 2, 2, 2, 2, 2], 3, 0, "Backward: Highly degenerate array, upper");
 });
 
+// issue #4436
+Tinytest.add("minimongo - modify with returnObject", function (test) {
+  var insertMany = function (coll, doc, times){
+    for (var i = 0; i < times; i++){
+      coll.insert(doc);
+    }
+  };
+  var modify = function(coll, query, mod, expected, returnObject=true, multi=true){
+    var opts = {};
+    if (multi){
+      opts = {
+        ...opts,
+        multi: true
+      }
+    }    
+    if (returnObject){
+      opts = {
+        ...opts,
+        _returnObject: true
+      }
+    }
+    var actual = coll.update(query, mod, opts);
+    test.equal(actual, expected, EJSON.stringify({query: query, mod: mod, opts:opts}))
+  };
+  var coll = new LocalCollection;
+  // checking that update returns total number scanned, not modified
+  insertMany(coll, {a:1},2);
+  //only one updated, no multi
+  modify(coll, {a:1},{$set:{a:1}},1, false, false); 
+  modify(coll, {a:1},{a:2},1, false, false);
+  // multi default for rest
+  modify(coll, {a:1},{a:2},1, false);
+  modify(coll, {a:2},{a:1},2, false);
+
+  insertMany(coll, {a:3},3);
+  modify(coll, {a:3},{a:3},3, false);
+  modify(coll, {a:3},{$set:{a:3}},3, false);
+  modify(coll, {a:3},{a:2},3, false);
+  modify(coll, {a:3},{a:3},0, false);
+
+  coll = new LocalCollection;
+  insertMany(coll, {a:2},3);
+  modify(coll, {a:2}, {$set:{a:2}}, {numberAffected:0});
+  modify(coll, {a:2}, {a:2}, {numberAffected:3});
+  modify(coll, {a:2}, {a:3}, {numberAffected:3});
+  modify(coll, {a:11}, {a:3}, {numberAffected:0});
+
+  insertMany(coll, {b:1,c:2},3);
+  modify(coll, {b:1}, {$set:{c:2}}, {numberAffected:0});
+  test.equal(coll.find({b:1, c:2}).count(),3);
+  modify(coll, {b:1}, {$set:{c:3}}, {numberAffected:3});
+
+});
+
 Tinytest.add("minimongo - modify", function (test) {
   var modifyWithQuery = function (doc, query, mod, expected) {
     var coll = new LocalCollection;

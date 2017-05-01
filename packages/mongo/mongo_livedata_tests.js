@@ -3458,6 +3458,20 @@ if (Meteor.isServer) {
     };
 
     var test5 = function () {
+      coll.update({legs: 4}, {$set: {category: 'quadruped'}}, {_returnObject: true, multi: true, upsert:true}, function (err, result) {
+        test.equal(result, {numberAffected:4});
+        test6();
+      });
+    };
+
+    var test6 = function () {
+      coll.update({legs: 4}, {$set: {category: 'quadruped'}}, {_returnObject: true}, function (err, result) {
+        test.equal(result, {numberAffected:1});
+        test7();
+      });
+    };
+
+    var test7 = function () {
       //upsert method works as upsert:true
       coll.upsert({legs: 4}, {$set: {category: 'quadruped'}}, {multi: true}, function (err, result) {
         test.equal(result.numberAffected, 4);
