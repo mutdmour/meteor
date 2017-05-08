@@ -3472,7 +3472,7 @@ if (Meteor.isServer) {
     };
 
     var test7 = function () {
-      //upsert method works as upsert:true
+      //upsert method works as upsert:true and _returnObject:true
       coll.upsert({legs: 4}, {$set: {category: 'quadruped'}}, {multi: true}, function (err, result) {
         test.equal(result.numberAffected, 4);
         onComplete();
@@ -3481,4 +3481,74 @@ if (Meteor.isServer) {
 
     test1();
   });
+
+  Tinytest.addAsync('mongo livedata - update/upsert callback with returnWriteResult', function (test, onComplete) {
+    var coll = new Mongo.Collection(Random.id());
+
+    coll.insert({a:1, b:2});
+
+    // basic update, same values (not modified)
+    var test1 = function() {
+      coll.update({a:1},{$set:{b:2}}, {returnWriteResult:true}, function(err, result) {
+        test.equal(result, {numberAffected: 1, numberUpserted: 0, numberModified: 0});
+        test2();
+      });
+    };
+
+    // basic update
+    var test2 = function() {
+      coll.update({a:1},{$set:{b:1}}, {returnWriteResult:true}, function(err, result) {
+        test.equal(result, {numberAffected: 1, numberUpserted: 0, numberModified: 1});
+        test3();
+      });
+    }
+
+    // no upsert
+    var test3 = function() {
+      coll.update({c:3},{$set:{b:1}}, {returnWriteResult:true}, function(err, result) {
+        test.equal(result, {numberAffected: 0, numberUpserted: 0, numberModified: 0});
+        test4();
+      });
+    }
+
+    // with upsert
+    var test4 = function() {
+      coll.update({c:3},{$set:{b:1}}, {returnWriteResult:true, upsert: true}, function(err, result) {
+        test.isTrue(result.insertedId);
+        delete result.insertedId
+        test.equal(result, {numberAffected: 1, numberUpserted: 1, numberModified: 0});
+        test5();
+      });
+    }
+
+    // with multi
+    var test5 = function() {
+      coll.update({b:1},{$set:{b:2}}, {multi: true, returnWriteResult:true}, function(err, result) {
+        test.equal(result, {numberAffected: 2, numberUpserted: 0, numberModified: 2});
+        test6();
+      });
+    }
+
+    //returnWriteResult overrides _returnObject
+    var test6 = function() {
+      coll.update({b:2},{$set:{b:1}}, {multi: true, returnWriteResult:true, _returnObject:true}, function(err, result) {
+        test.equal(result, {numberAffected: 2, numberUpserted: 0, numberModified: 2});
+        onComplete();
+      });
+    }
+
+    //same as test4 but with upsert
+    var test7 = function() {
+      coll.upsert({d:1},{$set:{b:1}}, {multi: true, returnWriteResult:true}, function(err, result){
+        test.isTrue(result.insertedId);
+        delete result.insertedId
+        test.equal(result, {numberAffected: 1, numberUpserted: 1, numberModified: 0});
+        onComplete();
+      });
+    }
+
+    test1();
+  });
 }
+
+

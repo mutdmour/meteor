@@ -546,7 +546,7 @@ MongoConnection.prototype._update = function (collection_name, selector, mod,
           // If we got here via a upsert() call, then options._returnObject will
           // be set and we should return the whole object. Otherwise, we should
           // just return the number of affected docs to match the mongo API.
-          if (result && ! options._returnObject) {
+          if (result && (!options._returnObject && !options.returnWriteResult)) {
             callback(error, result.numberAffected);
           } else {
             callback(error, result);
@@ -558,8 +558,13 @@ MongoConnection.prototype._update = function (collection_name, selector, mod,
         mongoSelector, mongoMod, mongoOpts,
         bindEnvironmentForWrite(function (err, result) {
           if (! err) {
-            var meteorResult = transformResult(result);
-            if (meteorResult && options._returnObject) {
+            var meteorResult;
+            if (options.returnWriteResult){
+              meteorResult = transformResult(result);
+              callback(err, meteorResult);
+            }
+            else if (options._returnObject) {
+              meteorResult = transformResult(result, true);
               // If this was an upsert() call, and we ended up
               // inserting a new doc and we know its id, then
               // return that id as well.
@@ -569,6 +574,7 @@ MongoConnection.prototype._update = function (collection_name, selector, mod,
               }
               callback(err, meteorResult);
             } else {
+              var meteorResult = transformResult(result);
               callback(err, meteorResult.numberAffected);
             }
           } else {
@@ -599,14 +605,41 @@ var isModificationMod = function (mod) {
   return isModify;
 };
 
-var transformResult = function (driverResult) {
-  var meteorResult = { numberAffected: 0 };
-  if (driverResult) {
+// issue #4436 _returnObject was deprecated in favor of returning the full mongo result object (returnWriteResult)
+var transformResult = function(driverResult, deprecated=false){
+  if (deprecated){
+    return _transformResult(driverResult);
+  }
+  var meteorResult = {
+    numberAffected: 0, //number scanned or upserted
+    numberModified: 0,
+    numberUpserted: 0
+  }
+  if (driverResult){
     var mongoResult = driverResult.result;
+    meteorResult.numberAffected = mongoResult.n;
+    meteorResult.numberModified = mongoResult.nModified;
 
     // On updates with upsert:true, the inserted values come as a list of
     // upserted values -- even with options.multi, when the upsert does insert,
     // it only inserts one element.
+    if (mongoResult.upserted){
+      meteorResult.numberUpserted = mongoResult.upserted.length;
+      if (mongoResult.upserted.length == 1) {
+        meteorResult.insertedId = mongoResult.upserted[0]._id;
+      }
+    }
+  }
+  return meteorResult;
+}
+
+/* deprecated #4436
+*/
+var _transformResult = function (driverResult) {
+  var meteorResult = { numberAffected: 0 };
+  if (driverResult) {
+    var mongoResult = driverResult.result;
+
     if (mongoResult.upserted) {
       meteorResult.numberAffected += mongoResult.upserted.length;
 
@@ -735,9 +768,14 @@ var simulateUpsertWithInsertedId = function (collection, selector, mod,
                           if (err) {
                             callback(err);
                           } else if (result && result.result.n != 0) {
-                            callback(null, {
+                            var res = {
                               numberAffected: result.result.n
-                            });
+                            }
+                            if (options.returnWriteResult){
+                              res.numberUpserted = result.result.n;
+                              res.numberModified = result.result.nModified;
+                            }
+                            callback(null, res);
                           } else {
                             doConditionalInsert();
                           }
@@ -761,10 +799,15 @@ var simulateUpsertWithInsertedId = function (collection, selector, mod,
                             callback(err);
                           }
                         } else {
-                          callback(null, {
+                          var res = {
                             numberAffected: result.result.upserted.length,
                             insertedId: insertedId,
-                          });
+                          }
+                          if (options.returnWriteResult){
+                            res.numberUpserted = result.result.n;
+                            res.numberModified = result.result.nModified;
+                          }
+                          callback(null, res);
                         }
                       }));
   };
@@ -793,7 +836,7 @@ MongoConnection.prototype.upsert = function (collectionName, selector, mod,
   return self.update(collectionName, selector, mod,
                      _.extend({}, options, {
                        upsert: true,
-                       _returnObject: true
+                       returnWriteResult: true
                      }), callback);
 };
 
