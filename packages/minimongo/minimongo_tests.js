@@ -2162,58 +2162,149 @@ Tinytest.add("minimongo - binary search", function (test) {
 });
 
 // issue #4436
+// import { Mongo } from 'meteor/mongo';
 Tinytest.add("minimongo - modify with returnObject", function (test) {
   var insertMany = function (coll, doc, times){
     for (var i = 0; i < times; i++){
       coll.insert(doc);
     }
   };
-  var modify = function(coll, query, mod, expected, returnObject=true, multi=true){
-    var opts = {};
-    if (multi){
-      opts = {
-        ...opts,
-        multi: true
-      }
-    }    
-    if (returnObject){
-      opts = {
-        ...opts,
-        _returnObject: true
-      }
-    }
+  var modify = function(coll, query, mod, expected, opts={}){
     var actual = coll.update(query, mod, opts);
     test.equal(actual, expected, EJSON.stringify({query: query, mod: mod, opts:opts}))
   };
-  var coll = new LocalCollection;
   // checking that update returns total number scanned, not modified
-  insertMany(coll, {a:1},2);
+  // coll = new Mongo.Collection(Random.id());
+  var coll = new LocalCollection;
+  insertMany(coll, {a:1, b:2},1);
+  insertMany(coll, {a:2, b:2},2);
   //only one updated, no multi
-  modify(coll, {a:1},{$set:{a:1}},1, false, false); 
-  modify(coll, {a:1},{a:2},1, false, false);
-  // multi default for rest
-  modify(coll, {a:1},{a:2},1, false);
-  modify(coll, {a:2},{a:1},2, false);
+  modify(coll, {a:2},{$set:{b:2}},1);  //with $set, same value
+  modify(coll, {a:2},{a:2,b:2},1); //replacing doc, same values
 
-  insertMany(coll, {a:3},3);
-  modify(coll, {a:3},{a:3},3, false);
-  modify(coll, {a:3},{$set:{a:3}},3, false);
-  modify(coll, {a:3},{a:2},3, false);
-  modify(coll, {a:3},{a:3},0, false);
+  modify(coll, {a:2},{$set:{b:3}},1);  //with $set, different value
+  modify(coll, {a:2},{a:2,b:3},1); //replacing doc, different values
+
+  // adding multi
+  var opts = {
+    multi:true
+  }
+  modify(coll, {a:2},{$set:{b:2}},2, opts);  //with $set, same value
+  modify(coll, {a:2},{a:2,b:2},2, opts); //replacing doc, same values
+
+  modify(coll, {a:2},{$set:{b:3}},2, opts);  //with $set, different value
+  modify(coll, {a:2},{a:2,b:3},2, opts); //replacing doc, different values
+
+  coll = new LocalCollection;
+  insertMany(coll, {a:1,b:2},3);
+  // _returnObject only
+  opts = {
+    _returnObject:true
+  }
+  modify(coll, {a:1}, {$set:{b:2}}, {numberAffected:1}, opts); 
+  modify(coll, {a:1}, {$set:{b:1}}, {numberAffected:1}, opts);
 
   coll = new LocalCollection;
   insertMany(coll, {a:2},3);
-  modify(coll, {a:2}, {$set:{a:2}}, {numberAffected:0});
-  modify(coll, {a:2}, {a:2}, {numberAffected:3});
-  modify(coll, {a:2}, {a:3}, {numberAffected:3});
-  modify(coll, {a:11}, {a:3}, {numberAffected:0});
+  // multi and _returnObject
+  opts = {
+    _returnObject:true,
+    multi:true
+  }
+  modify(coll, {a:2}, {$set:{a:2}}, {numberAffected:3}, opts); // same value
+  modify(coll, {a:2}, {a:2}, {numberAffected:3}, opts);
+  modify(coll, {a:2}, {a:3}, {numberAffected:3}, opts);
+  modify(coll, {a:11}, {a:3}, {numberAffected:0}, opts);
 
   insertMany(coll, {b:1,c:2},3);
-  modify(coll, {b:1}, {$set:{c:2}}, {numberAffected:0});
-  test.equal(coll.find({b:1, c:2}).count(),3);
-  modify(coll, {b:1}, {$set:{c:3}}, {numberAffected:3});
+  modify(coll, {b:1}, {$set:{c:2}}, {numberAffected:3}, opts); // same value
+  test.equal(coll.find({b:1, c:2}).count(),3, opts);
+  modify(coll, {b:1}, {$set:{c:3}}, {numberAffected:3}, opts);
 
+  var upsert = function(coll, query, mod, expected, insertedId=false, opts={}){
+    opts = {
+      ...opts,
+      upsert:true
+    }
+    var actual = coll.update(query, mod, opts);
+    if (insertedId){
+      test.isTrue(actual.insertedId);
+      delete actual.insertedId;
+    }
+    test.equal(actual, expected, EJSON.stringify({query: query, mod: mod, opts:opts}));
+  };
+
+  coll = new LocalCollection;
+  insertMany(coll, {a:1, b:2},3);
+  var opts = {
+    _returnObject: true
+  }
+  upsert(coll, {a:1},{$set:{b:2}},{numberAffected:1}, false, opts);
+  upsert(coll, {a:1},{$set:{b:1}},{numberAffected:1}, false, opts);
+  upsert(coll, {c:1},{$set:{b:2}},{numberAffected:1}, true, opts);
+
+  opts.multi = true;
+  upsert(coll, {a:1},{$set:{b:1}},{numberAffected:3}, false, opts);
+  upsert(coll, {d:1},{$set:{b:1}},{numberAffected:1}, true, opts);
+
+  var upsertFunc = function(coll, query, mod, expected, insertedId=false, opts={}){
+    var actual = coll.upsert(query, mod, opts);
+    if (insertedId){
+      test.isTrue(actual.insertedId);
+      delete actual.insertedId;
+    }
+    test.equal(actual, expected, EJSON.stringify({query: query, mod: mod, opts:opts}));
+  }
+  opts = {
+    _returnObject: true
+  }
+  upsertFunc(coll, {e:1}, {$set:{b:1}}, {numberAffected:1}, true, opts);
+  upsertFunc(coll, {a:1}, {$set:{b:1}}, {numberAffected:1}, false, opts);
+
+  opts.multi = true;
+  upsertFunc(coll, {a:1}, {$set:{b:1}}, {numberAffected:3}, false, opts);
 });
+
+// issue #4436
+// Tinytest.add("minimongo - modify with returnWriteResult", function (test) {
+//   var insertMany = function (coll, doc, times){
+//     for (var i = 0; i < times; i++){
+//       coll.insert(doc);
+//     }
+//   };
+//   var modify = function(coll, query, mod, expected, returnWriteResult=true, multi=true){
+//     var opts = {};
+//     if (multi){
+//       opts = {
+//         ...opts,
+//         multi: true
+//       }
+//     }    
+//     if (returnWriteResult){
+//       opts = {
+//         ...opts,
+//         returnWriteResult: true
+//       }
+//     }
+//     var actual = coll.update(query, mod, opts);
+//     test.equal(actual, expected, EJSON.stringify({query: query, mod: mod, opts:opts}))
+//   };
+//   var coll = new LocalCollection;
+//   // checking that update returns total number scanned, not modified
+
+//   coll = new LocalCollection;
+//   insertMany(coll, {a:2},3);
+//   modify(coll, {a:2}, {$set:{a:2}}, {numberAffected:0});
+//   modify(coll, {a:2}, {a:2}, {numberAffected:3});
+//   modify(coll, {a:2}, {a:3}, {numberAffected:3});
+//   modify(coll, {a:11}, {a:3}, {numberAffected:0});
+
+//   insertMany(coll, {b:1,c:2},3);
+//   modify(coll, {b:1}, {$set:{c:2}}, {numberAffected:0});
+//   test.equal(coll.find({b:1, c:2}).count(),3);
+//   modify(coll, {b:1}, {$set:{c:3}}, {numberAffected:3});
+
+// });
 
 Tinytest.add("minimongo - modify", function (test) {
   var modifyWithQuery = function (doc, query, mod, expected) {

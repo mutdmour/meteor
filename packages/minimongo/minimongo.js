@@ -755,15 +755,14 @@ LocalCollection.prototype.update = function (selector, mod, options, callback) {
   });
   var recomputeQids = {};
 
-  var updateCount = 0;
-
+  var affectedCount= 0;
   self._eachPossiblyMatchingDoc(selector, function (doc, id) {
     var queryResult = matcher.documentMatches(doc);
     if (queryResult.result) {
       // XXX Should we save the original even if mod ends up being a no-op?
       self._saveOriginal(id, doc);
       self._modifyAndNotify(doc, mod, recomputeQids, queryResult.arrayIndices);
-      ++updateCount;
+      ++affectedCount;
       if (!options.multi)
         return false;  // break
     }
@@ -781,27 +780,34 @@ LocalCollection.prototype.update = function (selector, mod, options, callback) {
   // it's time to do an insert. Figure out what document we are inserting, and
   // generate an id for it.
   var insertedId;
-  if (updateCount === 0 && options.upsert) {
+  if (affectedCount=== 0 && options.upsert) {
     var newDoc = LocalCollection._removeDollarOperators(selector);
     LocalCollection._modify(newDoc, mod, {isInsert: true});
     if (! newDoc._id && options.insertedId)
       newDoc._id = options.insertedId;
     insertedId = self.insert(newDoc);
-    updateCount = 1;
+    affectedCount= 1;
   }
 
   // Return the number of affected documents, or in the upsert case, an object
   // containing the number of affected docs and the id of the doc that was
   // inserted, if any.
   var result;
-  if (options._returnObject) {
+  if (options.returnWriteResult){
     result = {
-      numberAffected: updateCount
+      numberAffected: affectedCount,
+      numberUpserted: 0,
+      numberModified: 0
+    }
+  }
+  else if (options._returnObject) {
+    result = {
+      numberAffected:affectedCount
     };
     if (insertedId !== undefined)
       result.insertedId = insertedId;
   } else {
-    result = updateCount;
+    result = affectedCount;
   }
 
   if (callback)
